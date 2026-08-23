@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://az-exam-coach.local/schemas/question-candidate.schema.json",
+  "title": "Question candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "question_id",
+    "bank_id",
+    "exam_code",
+    "source_document_id",
+    "type",
+    "status",
+    "stem",
+    "options",
+    "correct_option_ids",
+    "source_spans",
+    "quality",
+    "content_version"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "question_id": { "$ref": "#/$defs/uuid" },
+    "bank_id": { "$ref": "#/$defs/uuid" },
+    "exam_code": { "enum": ["AZ-104", "AZ-305"] },
+    "source_document_id": { "$ref": "#/$defs/uuid" },
+    "source_question_no": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "type": {
+      "enum": ["single_choice", "multiple_choice", "true_false", "unknown"]
+    },
+    "status": { "enum": ["draft", "needs_review", "approved"] },
+    "stem": { "$ref": "#/$defs/textField" },
+    "options": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/option" }
+    },
+    "correct_option_ids": {
+      "type": "array",
+      "minItems": 0,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/uuid" }
+    },
+    "answer_confidence": { "$ref": "#/$defs/confidence" },
+    "answer_provenance": {
+      "anyOf": [
+        { "$ref": "#/$defs/answerProvenance" },
+        { "type": "null" }
+      ]
+    },
+    "explanation": {
+      "anyOf": [
+        { "$ref": "#/$defs/textField" },
+        { "type": "null" }
+      ]
+    },
+    "assets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset" }
+    },
+    "source_spans": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/sourceSpan" }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overall_confidence", "flags"],
+      "properties": {
+        "overall_confidence": { "$ref": "#/$defs/confidence" },
+        "flags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 80 }
+        },
+        "duplicate_group_id": {
+          "anyOf": [
+            { "$ref": "#/$defs/uuid" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "content_version": { "type": "integer", "minimum": 1 }
+    ,
+    "topic": { "type": "integer", "minimum": 1 },
+    "source_pages": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "integer", "minimum": 1 }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "approved" } },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["answer_provenance"],
+        "properties": {
+          "type": {
+            "enum": ["single_choice", "multiple_choice", "true_false"]
+          },
+          "options": { "minItems": 2 },
+          "answer_provenance": { "$ref": "#/$defs/answerProvenance" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": { "const": "approved" },
+          "type": { "enum": ["single_choice", "true_false"] }
+        },
+        "required": ["status", "type"]
+      },
+      "then": {
+        "properties": {
+          "correct_option_ids": { "minItems": 1, "maxItems": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": { "const": "approved" },
+          "type": { "const": "multiple_choice" }
+        },
+        "required": ["status", "type"]
+      },
+      "then": {
+        "properties": {
+          "correct_option_ids": { "minItems": 2 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "answerProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reference", "confirmed_at", "confirmed_by"],
+      "properties": {
+        "kind": {
+          "enum": ["manual", "source_document", "external_reference"]
+        },
+        "reference": { "type": "string", "minLength": 3, "maxLength": 500 },
+        "confirmed_at": { "type": "string", "format": "date-time" },
+        "confirmed_by": { "type": "string", "minLength": 1, "maxLength": 80 }
+      }
+    },
+    "bbox": {
+      "type": "array",
+      "prefixItems": [
+        { "type": "number", "minimum": 0, "maximum": 1 },
+        { "type": "number", "minimum": 0, "maximum": 1 },
+        { "type": "number", "minimum": 0, "maximum": 1 },
+        { "type": "number", "minimum": 0, "maximum": 1 }
+      ],
+      "items": false,
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "textField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw", "display", "confidence", "reviewed"],
+      "properties": {
+        "raw": { "type": "string" },
+        "display": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "reviewed": { "type": "boolean" }
+      }
+    },
+    "option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "raw", "display", "confidence", "reviewed"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "raw": { "type": "string" },
+        "display": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "reviewed": { "type": "boolean" }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "kind", "storage_key", "source_page", "bbox", "sha256"],
+      "properties": {
+        "asset_id": { "$ref": "#/$defs/uuid" },
+        "kind": { "enum": ["question_image", "option_image", "explanation_image"] },
+        "storage_key": { "type": "string", "minLength": 1 },
+        "source_page": { "type": "integer", "minimum": 1 },
+        "bbox": { "$ref": "#/$defs/bbox" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
+      }
+    },
+    "sourceSpan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["page", "bbox", "extractor", "text", "confidence"],
+      "properties": {
+        "page": { "type": "integer", "minimum": 1 },
+        "bbox": { "$ref": "#/$defs/bbox" },
+        "extractor": { "enum": ["pdf_text", "ocr", "manual"] },
+        "text": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/confidence" }
+      }
+    }
+  }
+}

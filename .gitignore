@@ -1,0 +1,34 @@
+# Private source material and generated question data
+data/private/
+**/data/private/
+PROJECT_MEMORY.md
+tmp/
+*.pdf
+
+# JavaScript
+node_modules/
+.next/
+out/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# Local configuration
+.env
+.env.local
+!.env.example
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+nul
+CLAUDE_WORKLOG.md*
+PROJECT_MEMORY.md.*backup*
+PROJECT_MEMORY.md.pre-*
+docs/answer-research/*.json
+docs/answer-research/*.tmp
+C*docsanswer-research*
