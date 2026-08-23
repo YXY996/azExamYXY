@@ -15,6 +15,7 @@
 - 批准会生成不可变题目版本；练习会话固定引用该版本。
 - 作答由服务端评分并保存，响应式练习界面支持电脑和手机尺寸。
 - 每组随机 20 题，记录正确率、作答时间，并支持错题本。
+- 可按 AZ-104/AZ-305 与一个或多个知识点筛选练习；符合条件不足 20 题时使用全部匹配题目。
 - 首次访问创建唯一管理员账号；之后必须登录才能访问题库、PDF 和业务 API。
 
 样本 PDF 没有答案与解析。系统不会猜测答案；必须由你录入，或者以后导入带可信来源的答案文件。
@@ -74,6 +75,13 @@ python -m unittest discover -s worker\tests -v
 cd apps\web
 pnpm lint
 pnpm build
+```
+
+带答案、解析和知识点标签的 Markdown 题库可用幂等导入器加入本机私有数据库：
+
+```powershell
+node scripts\import-markdown-question-banks.mjs D:\path\bank-v1.md D:\path\bank-v2.md
+node scripts\verify-markdown-import.mjs
 ```
 
 ## 项目资料

@@ -126,13 +126,13 @@ export default function Workspace({ bundle }: { bundle: CandidateBundle }) {
     }
   };
 
-  const openPractice = async (fresh = false, mode: "random" | "wrong_book" = "random") => {
+  const openPractice = async (fresh = false, mode: "random" | "wrong_book" = "random", examCode?: "AZ-104" | "AZ-305", knowledgePoints: string[] = []) => {
     setPracticeError("");
     setSaveMessage("正在恢复练习…");
     try {
       const response = await fetch("/api/practice/sessions", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ exam_code: bundle.document.exam_code, fresh, mode }),
+        body: JSON.stringify({ exam_code: examCode ?? bundle.document.exam_code, fresh, mode, knowledge_points: knowledgePoints }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "无法开始练习");
@@ -250,7 +250,7 @@ export default function Workspace({ bundle }: { bundle: CandidateBundle }) {
             <article><span>未结构化题</span><strong>{unknown}</strong><small>图片题已转为自评</small></article>
           </section>
 
-          <OverviewTools onPractice={() => openPractice()} onWrongPractice={() => openPractice(true, "wrong_book")} />
+          <OverviewTools onPractice={(examCode, points) => openPractice(true, "random", examCode, points)} onWrongPractice={() => openPractice(true, "wrong_book")} />
 
           <section className="pipeline-card">
             <div className="section-heading"><div><p className="eyebrow">导入任务</p><h2>解析进度</h2></div><span className="status-pill success">首批候选已生成</span></div>
@@ -358,7 +358,7 @@ export default function Workspace({ bundle }: { bundle: CandidateBundle }) {
             <section className="practice-card">
               <div className="practice-header"><button onClick={() => setView("overview")}>← 退出</button><div><strong>第 {practiceIndex + 1} / {practiceSession.items.length} 题</strong><span>{practiceSession.mode === "wrong_book" ? "错题本" : "随机 20 题"} · 正确率 {practiceSession.summary.accuracy}% · {formatDuration(practiceSession.summary.duration_ms)}</span></div><button className={practiceItem.is_marked ? "mark-button marked" : "mark-button"} onClick={toggleWrongBookMark}>{practiceItem.is_marked ? "★ 已标记" : "☆ 标记错题"}</button></div>
               <div className="mobile-progress"><i style={{ width: `${((practiceIndex + 1) / practiceSession.items.length) * 100}%` }} /></div>
-              <p className="practice-topic">AZ-104 · Topic {practiceQuestion.topic}</p>
+              <p className="practice-topic">{practiceQuestion.exam_code} · {practiceQuestion.knowledge_points?.join(" · ") || `Topic ${practiceQuestion.topic}`}{practiceQuestion.difficulty ? ` · ${practiceQuestion.difficulty}` : ""}</p>
               <h1>{practiceQuestion.stem.display}</h1>
               {practiceQuestion.type === "image_interaction" && (
                 <div className="practice-source-pages">

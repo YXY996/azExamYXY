@@ -33,6 +33,8 @@ export type CandidateQuestion = {
   quality: { overall_confidence: number; flags: string[] };
   content_version: number;
   topic: number;
+  knowledge_points?: string[];
+  difficulty?: "easy" | "medium" | "hard";
   source_pages: number[];
 };
 
@@ -53,7 +55,7 @@ export type PracticeItem = {
   item_id: string;
   ordinal: number;
   question_revision_id: string;
-  question: Pick<CandidateQuestion, "question_id" | "source_document_id" | "source_question_no" | "source_pages" | "type" | "stem" | "options" | "explanation" | "topic">;
+  question: Pick<CandidateQuestion, "question_id" | "source_document_id" | "source_question_no" | "source_pages" | "type" | "stem" | "options" | "explanation" | "topic" | "exam_code" | "knowledge_points" | "difficulty">;
   result: null | { is_correct: boolean; selected_option_ids: string[]; correct_option_ids: string[] };
   is_marked: boolean;
 };
@@ -64,6 +66,8 @@ export type PracticeSession = {
   started_at: string;
   completed_at: string | null;
   mode: "random" | "wrong_book";
+  exam_code: "AZ-104" | "AZ-305";
+  knowledge_points: string[];
   items: PracticeItem[];
   summary: { answered: number; correct: number; total: number; accuracy: number; duration_ms: number };
 };
@@ -97,5 +101,13 @@ export type StudySummary = {
     mode: "random" | "wrong_book";
     started_at: string;
     completed_at: string | null;
+  }>;
+};
+
+export type PracticeFilters = {
+  exams: Array<{
+    exam_code: "AZ-104" | "AZ-305";
+    total: number;
+    knowledge_points: Array<{ name: string; count: number }>;
   }>;
 };

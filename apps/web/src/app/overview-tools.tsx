@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { ImportJob, StudySummary } from "@/lib/types";
+import type { ImportJob, PracticeFilters, StudySummary } from "@/lib/types";
 
 const statusText: Record<ImportJob["status"], string> = {
   queued: "等待后台处理",
@@ -14,7 +14,10 @@ const statusText: Record<ImportJob["status"], string> = {
   failed: "导入失败",
 };
 
-export default function OverviewTools({ onPractice, onWrongPractice }: { onPractice: () => void; onWrongPractice: () => void }) {
+export default function OverviewTools({ onPractice, onWrongPractice }: {
+  onPractice: (examCode?: "AZ-104" | "AZ-305", knowledgePoints?: string[]) => void;
+  onWrongPractice: () => void;
+}) {
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [summary, setSummary] = useState<StudySummary | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -23,15 +26,20 @@ export default function OverviewTools({ onPractice, onWrongPractice }: { onPract
   const [confirmed, setConfirmed] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [message, setMessage] = useState("");
+  const [filters, setFilters] = useState<PracticeFilters>({ exams: [] });
+  const [practiceExam, setPracticeExam] = useState<"AZ-104" | "AZ-305">("AZ-104");
+  const [selectedPoints, setSelectedPoints] = useState<string[]>([]);
 
   const refresh = useCallback(async () => {
     try {
-      const [jobResponse, summaryResponse] = await Promise.all([
+      const [jobResponse, summaryResponse, filterResponse] = await Promise.all([
         fetch("/api/imports", { cache: "no-store" }),
         fetch("/api/study-summary", { cache: "no-store" }),
+        fetch("/api/practice/filters", { cache: "no-store" }),
       ]);
       if (jobResponse.ok) setJobs((await jobResponse.json()).jobs as ImportJob[]);
       if (summaryResponse.ok) setSummary(await summaryResponse.json() as StudySummary);
+      if (filterResponse.ok) setFilters(await filterResponse.json() as PracticeFilters);
     } catch {
       setMessage("暂时无法获取最新状态，已保留上次结果");
     }
@@ -44,6 +52,7 @@ export default function OverviewTools({ onPractice, onWrongPractice }: { onPract
   }, [refresh]);
 
   const activeJob = jobs[0];
+  const practicePoints = filters.exams.find((exam) => exam.exam_code === practiceExam)?.knowledge_points ?? [];
   const hasRunningJob = jobs.some((job) => !["review_ready", "failed"].includes(job.status));
   const recentSessions = summary?.recent_sessions ?? [];
   const formatTime = (value: string) => new Date(value).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -119,9 +128,26 @@ export default function OverviewTools({ onPractice, onWrongPractice }: { onPract
       </section>
 
       <section className="study-summary-grid">
-        <article><p className="eyebrow">20 题一组</p><h2>{summary?.active_session ? "继续本组练习" : "开始随机练习"}</h2><p>{summary?.active_session ? `已完成 ${summary.active_session.answered} / ${summary.active_session.total} · 正确率 ${summary.active_session.accuracy}% · ${formatDuration(summary.active_session.duration_ms)}` : "每组从题库随机抽取 20 题"}</p><button className="secondary-button" onClick={onPractice}>{summary?.active_session ? "继续本组" : "随机开始 20 题"}</button></article>
+        <article><p className="eyebrow">20 题一组</p><h2>{summary?.active_session ? "继续本组练习" : "开始随机练习"}</h2><p>{summary?.active_session ? `已完成 ${summary.active_session.answered} / ${summary.active_session.total} · 正确率 ${summary.active_session.accuracy}% · ${formatDuration(summary.active_session.duration_ms)}` : "每组从题库随机抽取 20 题"}</p><button className="secondary-button" onClick={() => onPractice()}>{summary?.active_session ? "继续本组" : "随机开始 20 题"}</button></article>
         <article><p className="eyebrow">错题本</p><strong className="wrong-count">{summary?.wrong_question_count ?? 0}</strong><p>{summary?.wrong_question_count ? "包含答错和手动标记的题目" : "答错或手动标记后会出现在这里"}</p><button className="secondary-button" disabled={!summary?.wrong_question_count} onClick={onWrongPractice}>练习错题</button></article>
         <article className="history-card"><div className="section-heading"><h2>最近练习</h2><small>最近 3 次</small></div>{recentSessions.length ? recentSessions.map((session) => <div className="history-row" key={session.session_id}><span><strong>{session.status === "active" ? "进行中" : session.mode === "wrong_book" ? "错题练习" : "随机练习"}</strong><small>{formatTime(session.started_at)} · {formatDuration(session.duration_ms)}</small></span><span>{session.answered}/{session.total} · 正确率 {session.accuracy}%</span></div>) : <p className="task-empty">还没有练习记录</p>}</article>
+      </section>
+
+      <section className="knowledge-practice-card">
+        <div className="section-heading"><div><p className="eyebrow">按知识点练习</p><h2>选择考试和薄弱知识点</h2></div><span className="status-pill success">随机最多 20 题</span></div>
+        <div className="knowledge-controls">
+          <label>考试类型<select value={practiceExam} onChange={(event) => { setPracticeExam(event.target.value as "AZ-104" | "AZ-305"); setSelectedPoints([]); }}>
+            {filters.exams.map((exam) => <option key={exam.exam_code} value={exam.exam_code}>{exam.exam_code} · {exam.total} 题</option>)}
+          </select></label>
+          <button className="secondary-button" onClick={() => setSelectedPoints([])}>清除选择</button>
+          <button className="primary-button" disabled={!filters.exams.length} onClick={() => onPractice(practiceExam, selectedPoints)}>{selectedPoints.length ? `练习已选 ${selectedPoints.length} 个知识点` : `练习全部 ${practiceExam}`}</button>
+        </div>
+        <div className="knowledge-point-grid">
+          {practicePoints.map((point) => <label className={selectedPoints.includes(point.name) ? "knowledge-chip selected" : "knowledge-chip"} key={point.name}>
+            <input type="checkbox" checked={selectedPoints.includes(point.name)} onChange={() => setSelectedPoints((items) => items.includes(point.name) ? items.filter((item) => item !== point.name) : [...items, point.name])} />
+            <span>{point.name}</span><small>{point.count} 题</small>
+          </label>)}
+        </div>
       </section>
     </>
   );

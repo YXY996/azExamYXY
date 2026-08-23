@@ -6,7 +6,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { applyEditableReview, validatePublishable, type EditableReview } from "./review-domain";
-import type { CandidateBundle, CandidateQuestion, ImportJob, PracticeItem, PracticeSession, StudySummary } from "./types";
+import type { CandidateBundle, CandidateQuestion, ImportJob, PracticeFilters, PracticeItem, PracticeSession, StudySummary } from "./types";
 
 const OWNER_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -86,6 +86,14 @@ function getDb() {
       owner_id TEXT NOT NULL, question_id TEXT NOT NULL, created_at TEXT NOT NULL,
       PRIMARY KEY(owner_id, question_id), FOREIGN KEY(question_id) REFERENCES questions(id)
     );
+    CREATE TABLE IF NOT EXISTS question_taxonomy (
+      question_id TEXT PRIMARY KEY, exam_code TEXT NOT NULL, difficulty TEXT,
+      FOREIGN KEY(question_id) REFERENCES questions(id)
+    );
+    CREATE TABLE IF NOT EXISTS question_knowledge_points (
+      question_id TEXT NOT NULL, knowledge_point TEXT NOT NULL,
+      PRIMARY KEY(question_id, knowledge_point), FOREIGN KEY(question_id) REFERENCES questions(id)
+    );
     CREATE TABLE IF NOT EXISTS import_jobs (
       id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, sha256 TEXT NOT NULL,
       filename TEXT NOT NULL, exam_code TEXT NOT NULL, max_questions INTEGER NOT NULL,
@@ -108,6 +116,9 @@ function getDb() {
   const sessionColumns = db.prepare("PRAGMA table_info(practice_sessions)").all() as SqliteRow[];
   if (!sessionColumns.some((column) => String(column.name) === "mode")) {
     db.exec("ALTER TABLE practice_sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'random'");
+  }
+  if (!sessionColumns.some((column) => String(column.name) === "filter_json")) {
+    db.exec("ALTER TABLE practice_sessions ADD COLUMN filter_json TEXT NOT NULL DEFAULT '[]'");
   }
   shared.__azExamDb = db;
   return db;
@@ -269,7 +280,8 @@ function practiceSessionFromDb(sessionId: string): PracticeSession {
         source_question_no: full.source_question_no, source_pages: full.source_pages,
         type: full.type, stem: full.stem, options: full.options,
         explanation: result || full.type === "image_interaction" ? full.explanation : null,
-        topic: full.topic,
+        topic: full.topic, exam_code: full.exam_code,
+        knowledge_points: full.knowledge_points, difficulty: full.difficulty,
       },
       result, is_marked: Boolean(row.is_marked),
     };
@@ -280,18 +292,25 @@ function practiceSessionFromDb(sessionId: string): PracticeSession {
     session_id: String(session.id), status: String(session.status) as "active" | "completed",
     started_at: String(session.started_at), completed_at: session.completed_at ? String(session.completed_at) : null,
     mode: String(session.mode ?? "random") as "random" | "wrong_book",
+    exam_code: String(session.exam_code) as "AZ-104" | "AZ-305",
+    knowledge_points: JSON.parse(String(session.filter_json ?? "[]")) as string[],
     items, summary: { answered, correct, total: items.length, accuracy: answered ? Math.round((correct / answered) * 100) : 0, duration_ms: durationMs },
   };
 }
 
-export function startOrResumePractice(examCode = "AZ-104", fresh = false, mode: "random" | "wrong_book" = "random") {
+export function startOrResumePractice(examCode = "AZ-104", fresh = false, mode: "random" | "wrong_book" = "random", knowledgePoints: string[] = []) {
+  const normalizedPoints = [...new Set(knowledgePoints.map((point) => point.trim()).filter(Boolean))].sort();
+  if (normalizedPoints.length > 20 || normalizedPoints.some((point) => point.length > 80)) {
+    throw new StoreError("知识点筛选条件无效", 400);
+  }
+  const filterJson = JSON.stringify(normalizedPoints);
   const sessionId = transaction((tx) => {
     if (fresh) {
       tx.prepare("UPDATE practice_sessions SET status = 'completed', completed_at = ? WHERE owner_id = ? AND exam_code = ? AND mode = ? AND status = 'active'")
         .run(now(), OWNER_ID, examCode, mode);
     }
-    const active = tx.prepare("SELECT id FROM practice_sessions WHERE owner_id = ? AND exam_code = ? AND status = 'active' AND mode = ? ORDER BY started_at DESC LIMIT 1")
-      .get(OWNER_ID, examCode, mode) as SqliteRow | undefined;
+    const active = tx.prepare("SELECT id FROM practice_sessions WHERE owner_id = ? AND exam_code = ? AND status = 'active' AND mode = ? AND filter_json = ? ORDER BY started_at DESC LIMIT 1")
+      .get(OWNER_ID, examCode, mode, filterJson) as SqliteRow | undefined;
     if (active) {
       const activeId = String(active.id);
       return activeId;
@@ -304,14 +323,24 @@ export function startOrResumePractice(examCode = "AZ-104", fresh = false, mode: 
       JOIN question_revisions qr2 ON qr2.id = pi2.question_revision_id
       WHERE ae2.is_correct = 0
     )` : "";
+    const pointFilter = normalizedPoints.length ? `AND EXISTS (
+      SELECT 1 FROM question_knowledge_points qkp
+      WHERE qkp.question_id = q.id AND qkp.knowledge_point IN (${normalizedPoints.map(() => "?").join(",")})
+    )` : "";
     const approved = tx.prepare(`SELECT q.current_revision_id, ak.id AS answer_key_id
       FROM questions q JOIN answer_keys ak ON ak.question_revision_id = q.current_revision_id
-      WHERE q.owner_id = ? AND q.current_revision_id IS NOT NULL ${sourceFilter}
-      ORDER BY random() LIMIT 20`).all(...(mode === "wrong_book" ? [OWNER_ID, OWNER_ID] : [OWNER_ID])) as SqliteRow[];
+      JOIN source_documents sd ON sd.id = q.source_document_id
+      LEFT JOIN question_taxonomy qt ON qt.question_id = q.id
+      WHERE q.owner_id = ? AND q.current_revision_id IS NOT NULL
+      AND COALESCE(qt.exam_code, sd.exam_code) = ? ${pointFilter} ${sourceFilter}
+      ORDER BY random() LIMIT 20`).all(...[
+        OWNER_ID, examCode, ...normalizedPoints,
+        ...(mode === "wrong_book" ? [OWNER_ID, OWNER_ID] : []),
+      ]) as SqliteRow[];
     if (!approved.length) throw new StoreError(mode === "wrong_book" ? "错题本还是空的" : "还没有已批准题目", 409);
     const id = randomUUID();
-    tx.prepare("INSERT INTO practice_sessions (id, owner_id, exam_code, status, mode, started_at) VALUES (?, ?, ?, 'active', ?, ?)")
-      .run(id, OWNER_ID, examCode, mode, now());
+    tx.prepare("INSERT INTO practice_sessions (id, owner_id, exam_code, status, mode, filter_json, started_at) VALUES (?, ?, ?, 'active', ?, ?, ?)")
+      .run(id, OWNER_ID, examCode, mode, filterJson, now());
     const insert = tx.prepare("INSERT INTO practice_items (id, session_id, ordinal, question_revision_id, answer_key_id) VALUES (?, ?, ?, ?, ?)");
     approved.forEach((row, index) => insert.run(
       randomUUID(), id, index + 1, String(row.current_revision_id), String(row.answer_key_id),
@@ -319,6 +348,29 @@ export function startOrResumePractice(examCode = "AZ-104", fresh = false, mode: 
     return id;
   });
   return practiceSessionFromDb(sessionId);
+}
+
+export function getPracticeFilters(): PracticeFilters {
+  const rows = getDb().prepare(`SELECT exam_code, knowledge_point, COUNT(*) AS count FROM (
+      SELECT COALESCE(qt.exam_code, sd.exam_code) AS exam_code,
+        COALESCE(qkp.knowledge_point, 'Topic ' || q.topic) AS knowledge_point, q.id
+      FROM questions q
+      JOIN source_documents sd ON sd.id = q.source_document_id
+      LEFT JOIN question_taxonomy qt ON qt.question_id = q.id
+      LEFT JOIN question_knowledge_points qkp ON qkp.question_id = q.id
+      WHERE q.owner_id = ? AND q.current_revision_id IS NOT NULL
+    ) GROUP BY exam_code, knowledge_point ORDER BY exam_code, knowledge_point`).all(OWNER_ID) as SqliteRow[];
+  const exams = (["AZ-104", "AZ-305"] as const).map((examCode) => {
+    const points = rows.filter((row) => String(row.exam_code) === examCode)
+      .map((row) => ({ name: String(row.knowledge_point), count: Number(row.count) }));
+    const totalRow = getDb().prepare(`SELECT COUNT(*) AS count FROM questions q
+      JOIN source_documents sd ON sd.id = q.source_document_id
+      LEFT JOIN question_taxonomy qt ON qt.question_id = q.id
+      WHERE q.owner_id = ? AND q.current_revision_id IS NOT NULL
+      AND COALESCE(qt.exam_code, sd.exam_code) = ?`).get(OWNER_ID, examCode) as SqliteRow;
+    return { exam_code: examCode, total: Number(totalRow.count), knowledge_points: points };
+  }).filter((exam) => exam.total > 0);
+  return { exams };
 }
 
 export function submitPracticeAnswer(sessionId: string, itemId: string, eventId: string, selectedOptionIds: string[], durationMs = 0) {
