@@ -1,0 +1,45 @@
+{
+  "source_sha256": "5E50111B7D383AAB94D313083C7691BB63863DE8AAF76BC714D775A0881827AE",
+  "source_pages": 791,
+  "target_question_count": 120,
+  "selection_strategy": "stratified_manual_review",
+  "required_page_ranges": [
+    "1-22",
+    "42-53",
+    "107-112",
+    "180-186",
+    "309-320",
+    "502-504",
+    "609-624",
+    "641-656",
+    "680-684",
+    "760-770",
+    "789-791"
+  ],
+  "target_mix": {
+    "ordinary_single_choice": 30,
+    "yes_no_matrix": 10,
+    "explicit_multiple_choice": 15,
+    "hotspot_or_dropdown": 30,
+    "drag_drop_or_ordering": 15,
+    "case_study": 7,
+    "image_only_or_cross_page": 7,
+    "tail_topics_and_layout_variants": 6
+  },
+  "mandatory_anomalies": [
+    "T5-Q149 pages 680 and 681",
+    "T5-Q150 pages 682 and 683",
+    "T6-Q60 pages 761 and 762",
+    "T6-Q61 pages 764 and 765",
+    "Topic 15 missing display question number 2",
+    "all suspected duplicate-content groups"
+  ],
+  "release_gate": {
+    "source_boundary_accuracy": 0.99,
+    "stem_exact_or_accepted": 0.98,
+    "option_exact_or_accepted": 0.98,
+    "asset_crop_accepted": 0.95,
+    "answer_must_have_provenance": true,
+    "unreviewed_publish_allowed": false
+  }
+}
