@@ -228,8 +228,8 @@ export default function Workspace({ bundle }: { bundle: CandidateBundle }) {
           <section className="hero-panel">
             <div>
               <p className="eyebrow">全量题库与答案已接入</p>
-              <h1>610 道 AZ-104 题目，电脑和手机都能练。</h1>
-              <p className="hero-copy">系统已将纯题目版与带讨论答案版逐题匹配。普通题可自动评分，图片交互题可查看 PDF 标记答案并自评。</p>
+              <h1>1210 道 AZ-104 / AZ-305 题目，电脑和手机都能练。</h1>
+              <p className="hero-copy">题库包含 610 道 PDF 题和 600 道原创模拟题；可按考试与知识点随机练习，普通题自动评分，图片交互题保留 PDF 标记答案供自评。</p>
               <div className="hero-actions">
                 <button className="primary-button" onClick={() => setView("review")}>开始校对</button>
                 <button className="secondary-button" onClick={() => openPractice()}>继续练习</button>
@@ -244,7 +244,7 @@ export default function Workspace({ bundle }: { bundle: CandidateBundle }) {
           </section>
 
           <section className="metric-grid" aria-label="导入统计">
-            <article><span>候选题</span><strong>{questions.length}</strong><small>覆盖至第 {lastSamplePage} 页</small></article>
+            <article><span>PDF 题库</span><strong>{questions.length}</strong><small>覆盖至第 {lastSamplePage} 页</small></article>
             <article><span>待处理</span><strong>{questions.length - approved.length}</strong><small>未发布题目</small></article>
             <article><span>跨页题</span><strong>{crossPage}</strong><small>已自动合并来源页</small></article>
             <article><span>未结构化题</span><strong>{unknown}</strong><small>图片题已转为自评</small></article>
