@@ -53,6 +53,7 @@ pnpm start
 - GitHub Actions 负责检查、制作镜像和触发部署，不提供常驻网站进程。容器必须运行在 Azure Container Apps、VPS、NAS 或自托管 Runner 所在机器。
 - 本项目只使用标准 GitHub-hosted Runner 的免费额度或自托管 Runner；不使用 larger runner 或付费 Actions。私有 GitHub Free 仓库当前包含每月 2000 分钟，公开仓库的标准 Runner 和自托管 Runner免费。
 - 容器的 `/app/data/private` 必须挂载持久卷；该目录包含 SQLite、题目页图和答案图片，不进入 Git 或容器镜像。
+- 可选的本机部署工作流只在受保护 `master` 的 CI 成功后运行，或由仓库所有者手动触发。它调用仓库外的私有控制器；Fork 和 Pull Request 不会触发本机 Runner，也无法访问本机 PDF、数据库或会话密钥。
 
 容器运行示例：
 
@@ -64,7 +65,7 @@ docker run -d --name az-exam-coach --restart unless-stopped \
   ghcr.io/OWNER/az-exam-coach:latest
 ```
 
-当前仓库未配置 Git remote，也没有常驻运行平台的访问授权；因此 GitHub Actions 文件可以提交，但首次远程推送和实际平台部署需要先绑定 GitHub 仓库与运行目标。
+公开仓库只保存代码和部署契约。生产数据、Cloudflare Tunnel 状态、会话密钥及本机部署控制器均保存在运行主机，不能提交到 Git。
 
 ## 质量检查
 

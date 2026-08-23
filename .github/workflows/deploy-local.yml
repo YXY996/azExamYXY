@@ -1,0 +1,33 @@
+name: Deploy protected master to local service
+
+on:
+  workflow_run:
+    workflows: ["Check and publish"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: az-exam-local-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'master')
+    runs-on: [self-hosted, Windows, X64, az-exam-coach]
+    timeout-minutes: 30
+    steps:
+      - name: Deploy through the private local controller
+        shell: powershell
+        run: |
+          $controller = Join-Path $env:LOCALAPPDATA 'az-exam-coach\deploy-from-github.ps1'
+          if (-not (Test-Path -LiteralPath $controller)) {
+            throw 'The private deployment controller is not installed.'
+          }
+          & $controller
