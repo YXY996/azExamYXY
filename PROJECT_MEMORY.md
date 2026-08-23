@@ -93,6 +93,7 @@
 - 错题本由“服务端判错的题目”与“用户手动标记的题目”取并集；练习页可随时添加/取消手动标记，概览可随机抽取最多 20 道错题练习。旧 610 题活动会话已归档，新活动组为随机 20 题且 0/20 未作答。
 - 2026-08-24 增加单用户身份认证：首次注册创建唯一管理员账号，密码使用 scrypt+随机盐保存，之后注册关闭；登录签发 30 天 HttpOnly/SameSite=Strict 签名 Cookie，全站、PDF 与业务 API 均受保护，只有 `/api/health` 匿名开放。生产环境要求至少 32 位 `APP_SESSION_SECRET` 与 HTTPS。
 - GitHub Actions 已加入提交检查、测试/Lint/生产构建、GHCR `latest` 容器镜像发布和每 30 分钟健康检查。费用决策：只使用标准 GitHub-hosted Runner 免费额度或自托管 Runner，不启用 larger runner/付费 Actions；私有 GitHub Free 按当前官方额度每月 2000 分钟，30 分钟一次监控约占 1440 分钟。GitHub Actions 不作为常驻主机；运行容器需要外部平台和持久卷 `/app/data/private`。当前 Git 仓库没有 remote，且尚未提供运行平台授权，因此只能完成本地提交与部署制品，不能远程推送或启动云服务。
+- 2026-08-24 代码已推送到公开仓库 `YXY996/azExamYXY`；公开仓库仅含应用代码，不含 PDF、SQLite、题目资产或凭据。仓库采用 `@YXY996` CODEOWNERS、最小化 Actions 权限、Dependabot 与私密漏洞报告，并要求仓库规则保护 `master`，仅仓库所有者负责接受或合并变更。
 - 2026-08-14 项目记忆已统一接入 Obsidian Vault `C:\Users\wisdom\Documents\Obsidian\AI-Memory-Hub`：项目长期记忆存放在 `projects/az-exam-coach.md`，Claude 执行账本存放在 `audit/az-exam-coach-claude-worklog.md`，Azure 研究记忆存放在 `AZ-104/research-memory/`。项目原路径通过硬链接或目录联接指向 Vault，避免双份真相。
 
 ## 团队工作规则
