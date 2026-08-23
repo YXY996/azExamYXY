@@ -1,10 +1,12 @@
 import { parseEditableReview } from "@/lib/review-domain";
 import { approveDraft, StoreError } from "@/lib/review-store";
+import { authErrorResponse, requireAdmin } from "@/lib/auth-request";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request, context: RouteContext<"/api/review/questions/[questionId]/approve">) {
   try {
+    await requireAdmin(request);
     const { questionId } = await context.params;
     const body = await request.json() as { editable?: unknown; expected_lock_version?: number };
     const editable = parseEditableReview(body.editable);
@@ -13,6 +15,7 @@ export async function POST(request: Request, context: RouteContext<"/api/review/
     }
     return Response.json(approveDraft(questionId, editable, body.expected_lock_version!));
   } catch (error) {
+    const authResponse = authErrorResponse(error); if (authResponse) return authResponse;
     if (error instanceof StoreError) return Response.json({ error: error.message }, { status: error.status });
     return Response.json({ error: "Unable to approve question" }, { status: 500 });
   }

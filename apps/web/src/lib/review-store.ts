@@ -86,6 +86,10 @@ function getDb() {
       owner_id TEXT NOT NULL, question_id TEXT NOT NULL, created_at TEXT NOT NULL,
       PRIMARY KEY(owner_id, question_id), FOREIGN KEY(question_id) REFERENCES questions(id)
     );
+    CREATE TABLE IF NOT EXISTS user_question_entitlements (
+      user_id TEXT NOT NULL, question_id TEXT NOT NULL, granted_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, question_id), FOREIGN KEY(question_id) REFERENCES questions(id)
+    );
     CREATE TABLE IF NOT EXISTS question_taxonomy (
       question_id TEXT PRIMARY KEY, exam_code TEXT NOT NULL, difficulty TEXT,
       FOREIGN KEY(question_id) REFERENCES questions(id)
@@ -135,6 +139,51 @@ function transaction<T>(work: (db: DatabaseSync) => T): T {
     db.exec("ROLLBACK");
     throw error;
   }
+}
+
+function ensurePreviewEntitlements(ownerId: string) {
+  const existing = getDb().prepare(`SELECT COUNT(*) AS count FROM user_question_entitlements uqe
+    JOIN questions q ON q.id = uqe.question_id
+    WHERE uqe.user_id = ? AND q.current_revision_id IS NOT NULL`).get(ownerId) as SqliteRow;
+  if (Number(existing.count) >= 50) return;
+  transaction((db) => {
+    const insert = db.prepare(`INSERT OR IGNORE INTO user_question_entitlements
+      (user_id, question_id, granted_at) VALUES (?, ?, ?)`);
+    for (const examCode of ["AZ-104", "AZ-305"]) {
+      const current = db.prepare(`SELECT COUNT(*) AS count
+        FROM user_question_entitlements uqe
+        JOIN questions q ON q.id = uqe.question_id
+        JOIN source_documents sd ON sd.id = q.source_document_id
+        LEFT JOIN question_taxonomy qt ON qt.question_id = q.id
+        WHERE uqe.user_id = ? AND q.current_revision_id IS NOT NULL
+          AND COALESCE(qt.exam_code, sd.exam_code) = ?`)
+        .get(ownerId, examCode) as SqliteRow;
+      const needed = Math.max(0, 25 - Number(current.count));
+      if (!needed) continue;
+      const rows = db.prepare(`SELECT q.id FROM questions q
+        JOIN source_documents sd ON sd.id = q.source_document_id
+        LEFT JOIN question_taxonomy qt ON qt.question_id = q.id
+        LEFT JOIN user_question_entitlements uqe
+          ON uqe.question_id = q.id AND uqe.user_id = ?
+        WHERE q.current_revision_id IS NOT NULL AND uqe.question_id IS NULL
+          AND COALESCE(qt.exam_code, sd.exam_code) = ?
+        ORDER BY random() LIMIT ?`).all(ownerId, examCode, needed) as SqliteRow[];
+      for (const row of rows) insert.run(ownerId, String(row.id), now());
+    }
+    const total = db.prepare(`SELECT COUNT(*) AS count FROM user_question_entitlements uqe
+      JOIN questions q ON q.id = uqe.question_id
+      WHERE uqe.user_id = ? AND q.current_revision_id IS NOT NULL`)
+      .get(ownerId) as SqliteRow;
+    const remaining = Math.max(0, 50 - Number(total.count));
+    if (remaining) {
+      const rows = db.prepare(`SELECT q.id FROM questions q
+        LEFT JOIN user_question_entitlements uqe
+          ON uqe.question_id = q.id AND uqe.user_id = ?
+        WHERE q.current_revision_id IS NOT NULL AND uqe.question_id IS NULL
+        ORDER BY random() LIMIT ?`).all(ownerId, remaining) as SqliteRow[];
+      for (const row of rows) insert.run(ownerId, String(row.id), now());
+    }
+  });
 }
 
 function seedBundle(bundle: CandidateBundle) {
@@ -249,10 +298,18 @@ export function approveDraft(questionId: string, editable: EditableReview, expec
   });
 }
 
-function practiceSessionFromDb(sessionId: string): PracticeSession {
+function practiceSessionFromDb(ownerId: string, fullAccess: boolean, sessionId: string): PracticeSession {
   const db = getDb();
-  const session = db.prepare("SELECT * FROM practice_sessions WHERE id = ? AND owner_id = ?").get(sessionId, OWNER_ID) as SqliteRow | undefined;
+  const session = db.prepare("SELECT * FROM practice_sessions WHERE id = ? AND owner_id = ?").get(sessionId, ownerId) as SqliteRow | undefined;
   if (!session) throw new StoreError("Practice session not found", 404);
+  if (!fullAccess) {
+    const inaccessible = db.prepare(`SELECT 1 AS found FROM practice_items pi
+      JOIN question_revisions qr ON qr.id = pi.question_revision_id
+      LEFT JOIN user_question_entitlements uqe
+        ON uqe.question_id = qr.question_id AND uqe.user_id = ?
+      WHERE pi.session_id = ? AND uqe.question_id IS NULL LIMIT 1`).get(ownerId, sessionId);
+    if (inaccessible) throw new StoreError("当前权限无法访问这个练习组，请开始新的练习", 403);
+  }
   const rows = db.prepare(`SELECT pi.id AS item_id, pi.ordinal, pi.question_revision_id,
       qr.content_json, ae.selected_option_ids_json, ae.is_correct, ae.duration_ms, ak.option_ids_json,
       CASE WHEN wbi.question_id IS NULL THEN 0 ELSE 1 END AS is_marked
@@ -261,7 +318,7 @@ function practiceSessionFromDb(sessionId: string): PracticeSession {
     JOIN answer_keys ak ON ak.id = pi.answer_key_id
     LEFT JOIN answer_events ae ON ae.session_item_id = pi.id
     LEFT JOIN wrong_book_items wbi ON wbi.question_id = qr.question_id AND wbi.owner_id = ?
-    WHERE pi.session_id = ? ORDER BY pi.ordinal`).all(OWNER_ID, sessionId) as SqliteRow[];
+    WHERE pi.session_id = ? ORDER BY pi.ordinal`).all(ownerId, sessionId) as SqliteRow[];
   
   let correct = 0;
   const items: PracticeItem[] = rows.map((row) => {
@@ -298,7 +355,8 @@ function practiceSessionFromDb(sessionId: string): PracticeSession {
   };
 }
 
-export function startOrResumePractice(examCode = "AZ-104", fresh = false, mode: "random" | "wrong_book" = "random", knowledgePoints: string[] = []) {
+export function startOrResumePractice(ownerId: string, fullAccess: boolean, examCode = "AZ-104", fresh = false, mode: "random" | "wrong_book" = "random", knowledgePoints: string[] = []) {
+  if (!fullAccess) ensurePreviewEntitlements(ownerId);
   const normalizedPoints = [...new Set(knowledgePoints.map((point) => point.trim()).filter(Boolean))].sort();
   if (normalizedPoints.length > 20 || normalizedPoints.some((point) => point.length > 80)) {
     throw new StoreError("知识点筛选条件无效", 400);
@@ -307,10 +365,20 @@ export function startOrResumePractice(examCode = "AZ-104", fresh = false, mode: 
   const sessionId = transaction((tx) => {
     if (fresh) {
       tx.prepare("UPDATE practice_sessions SET status = 'completed', completed_at = ? WHERE owner_id = ? AND exam_code = ? AND mode = ? AND status = 'active'")
-        .run(now(), OWNER_ID, examCode, mode);
+        .run(now(), ownerId, examCode, mode);
     }
-    const active = tx.prepare("SELECT id FROM practice_sessions WHERE owner_id = ? AND exam_code = ? AND status = 'active' AND mode = ? AND filter_json = ? ORDER BY started_at DESC LIMIT 1")
-      .get(OWNER_ID, examCode, mode, filterJson) as SqliteRow | undefined;
+    const accessibleActiveFilter = fullAccess ? "" : `AND NOT EXISTS (
+      SELECT 1 FROM practice_items pi
+      JOIN question_revisions qr ON qr.id = pi.question_revision_id
+      LEFT JOIN user_question_entitlements uqe
+        ON uqe.question_id = qr.question_id AND uqe.user_id = ?
+      WHERE pi.session_id = ps.id AND uqe.question_id IS NULL
+    )`;
+    const active = tx.prepare(`SELECT ps.id FROM practice_sessions ps
+      WHERE ps.owner_id = ? AND ps.exam_code = ? AND ps.status = 'active'
+        AND ps.mode = ? AND ps.filter_json = ? ${accessibleActiveFilter}
+      ORDER BY ps.started_at DESC LIMIT 1`)
+      .get(ownerId, examCode, mode, filterJson, ...(!fullAccess ? [ownerId] : [])) as SqliteRow | undefined;
     if (active) {
       const activeId = String(active.id);
       return activeId;
@@ -321,8 +389,13 @@ export function startOrResumePractice(examCode = "AZ-104", fresh = false, mode: 
       SELECT qr2.question_id FROM answer_events ae2
       JOIN practice_items pi2 ON pi2.id = ae2.session_item_id
       JOIN question_revisions qr2 ON qr2.id = pi2.question_revision_id
-      WHERE ae2.is_correct = 0
+      JOIN practice_sessions ps2 ON ps2.id = pi2.session_id
+      WHERE ae2.is_correct = 0 AND ps2.owner_id = ?
     )` : "";
+    const entitlementFilter = fullAccess ? "" : `AND EXISTS (
+      SELECT 1 FROM user_question_entitlements uqe
+      WHERE uqe.user_id = ? AND uqe.question_id = q.id
+    )`;
     const pointFilter = normalizedPoints.length ? `AND EXISTS (
       SELECT 1 FROM question_knowledge_points qkp
       WHERE qkp.question_id = q.id AND qkp.knowledge_point IN (${normalizedPoints.map(() => "?").join(",")})
@@ -332,25 +405,32 @@ export function startOrResumePractice(examCode = "AZ-104", fresh = false, mode: 
       JOIN source_documents sd ON sd.id = q.source_document_id
       LEFT JOIN question_taxonomy qt ON qt.question_id = q.id
       WHERE q.owner_id = ? AND q.current_revision_id IS NOT NULL
-      AND COALESCE(qt.exam_code, sd.exam_code) = ? ${pointFilter} ${sourceFilter}
+      AND COALESCE(qt.exam_code, sd.exam_code) = ? ${pointFilter} ${entitlementFilter} ${sourceFilter}
       ORDER BY random() LIMIT 20`).all(...[
         OWNER_ID, examCode, ...normalizedPoints,
-        ...(mode === "wrong_book" ? [OWNER_ID, OWNER_ID] : []),
+        ...(!fullAccess ? [ownerId] : []),
+        ...(mode === "wrong_book" ? [ownerId, ownerId] : []),
       ]) as SqliteRow[];
     if (!approved.length) throw new StoreError(mode === "wrong_book" ? "错题本还是空的" : "还没有已批准题目", 409);
     const id = randomUUID();
     tx.prepare("INSERT INTO practice_sessions (id, owner_id, exam_code, status, mode, filter_json, started_at) VALUES (?, ?, ?, 'active', ?, ?, ?)")
-      .run(id, OWNER_ID, examCode, mode, filterJson, now());
+      .run(id, ownerId, examCode, mode, filterJson, now());
     const insert = tx.prepare("INSERT INTO practice_items (id, session_id, ordinal, question_revision_id, answer_key_id) VALUES (?, ?, ?, ?, ?)");
     approved.forEach((row, index) => insert.run(
       randomUUID(), id, index + 1, String(row.current_revision_id), String(row.answer_key_id),
     ));
     return id;
   });
-  return practiceSessionFromDb(sessionId);
+  return practiceSessionFromDb(ownerId, fullAccess, sessionId);
 }
 
-export function getPracticeFilters(): PracticeFilters {
+export function getPracticeFilters(ownerId: string, fullAccess: boolean): PracticeFilters {
+  if (!fullAccess) ensurePreviewEntitlements(ownerId);
+  const entitlementFilter = fullAccess ? "" : `AND EXISTS (
+    SELECT 1 FROM user_question_entitlements uqe
+    WHERE uqe.user_id = ? AND uqe.question_id = q.id
+  )`;
+  const entitlementParams = fullAccess ? [] : [ownerId];
   const rows = getDb().prepare(`SELECT exam_code, knowledge_point, COUNT(*) AS count FROM (
       SELECT COALESCE(qt.exam_code, sd.exam_code) AS exam_code,
         COALESCE(qkp.knowledge_point, 'Topic ' || q.topic) AS knowledge_point, q.id
@@ -358,8 +438,8 @@ export function getPracticeFilters(): PracticeFilters {
       JOIN source_documents sd ON sd.id = q.source_document_id
       LEFT JOIN question_taxonomy qt ON qt.question_id = q.id
       LEFT JOIN question_knowledge_points qkp ON qkp.question_id = q.id
-      WHERE q.owner_id = ? AND q.current_revision_id IS NOT NULL
-    ) GROUP BY exam_code, knowledge_point ORDER BY exam_code, knowledge_point`).all(OWNER_ID) as SqliteRow[];
+      WHERE q.owner_id = ? AND q.current_revision_id IS NOT NULL ${entitlementFilter}
+    ) GROUP BY exam_code, knowledge_point ORDER BY exam_code, knowledge_point`).all(OWNER_ID, ...entitlementParams) as SqliteRow[];
   const exams = (["AZ-104", "AZ-305"] as const).map((examCode) => {
     const points = rows.filter((row) => String(row.exam_code) === examCode)
       .map((row) => ({ name: String(row.knowledge_point), count: Number(row.count) }));
@@ -367,18 +447,23 @@ export function getPracticeFilters(): PracticeFilters {
       JOIN source_documents sd ON sd.id = q.source_document_id
       LEFT JOIN question_taxonomy qt ON qt.question_id = q.id
       WHERE q.owner_id = ? AND q.current_revision_id IS NOT NULL
-      AND COALESCE(qt.exam_code, sd.exam_code) = ?`).get(OWNER_ID, examCode) as SqliteRow;
+      AND COALESCE(qt.exam_code, sd.exam_code) = ? ${entitlementFilter}`).get(OWNER_ID, examCode, ...entitlementParams) as SqliteRow;
     return { exam_code: examCode, total: Number(totalRow.count), knowledge_points: points };
   }).filter((exam) => exam.total > 0);
   return { exams };
 }
 
-export function submitPracticeAnswer(sessionId: string, itemId: string, eventId: string, selectedOptionIds: string[], durationMs = 0) {
+export function submitPracticeAnswer(ownerId: string, fullAccess: boolean, sessionId: string, itemId: string, eventId: string, selectedOptionIds: string[], durationMs = 0) {
   transaction((db) => {
+    const entitlementJoin = fullAccess ? "" : `JOIN user_question_entitlements uqe
+      ON uqe.question_id = qr.question_id AND uqe.user_id = ?`;
     const row = db.prepare(`SELECT pi.id, qr.content_json, ak.option_ids_json
       FROM practice_items pi JOIN question_revisions qr ON qr.id = pi.question_revision_id
       JOIN answer_keys ak ON ak.id = pi.answer_key_id
-      WHERE pi.id = ? AND pi.session_id = ?`).get(itemId, sessionId) as SqliteRow | undefined;
+      JOIN practice_sessions ps ON ps.id = pi.session_id
+      ${entitlementJoin}
+      WHERE pi.id = ? AND pi.session_id = ? AND ps.owner_id = ?`)
+      .get(...(!fullAccess ? [ownerId] : []), itemId, sessionId, ownerId) as SqliteRow | undefined;
     if (!row) throw new StoreError("Practice item not found", 404);
     const prior = db.prepare("SELECT id FROM answer_events WHERE session_item_id = ?").get(itemId) as SqliteRow | undefined;
     if (prior) return;
@@ -401,26 +486,30 @@ export function submitPracticeAnswer(sessionId: string, itemId: string, eventId:
       db.prepare("UPDATE practice_sessions SET status = 'completed', completed_at = ? WHERE id = ?").run(now(), sessionId);
     }
   });
-  return practiceSessionFromDb(sessionId);
+  return practiceSessionFromDb(ownerId, fullAccess, sessionId);
 }
 
-export function setWrongBookMark(sessionId: string, itemId: string, marked: boolean) {
+export function setWrongBookMark(ownerId: string, fullAccess: boolean, sessionId: string, itemId: string, marked: boolean) {
   transaction((db) => {
+    const entitlementJoin = fullAccess ? "" : `JOIN user_question_entitlements uqe
+      ON uqe.question_id = qr.question_id AND uqe.user_id = ?`;
     const row = db.prepare(`SELECT qr.question_id FROM practice_items pi
       JOIN question_revisions qr ON qr.id = pi.question_revision_id
       JOIN practice_sessions ps ON ps.id = pi.session_id
-      WHERE pi.id = ? AND pi.session_id = ? AND ps.owner_id = ?`).get(itemId, sessionId, OWNER_ID) as SqliteRow | undefined;
+      ${entitlementJoin}
+      WHERE pi.id = ? AND pi.session_id = ? AND ps.owner_id = ?`)
+      .get(...(!fullAccess ? [ownerId] : []), itemId, sessionId, ownerId) as SqliteRow | undefined;
     if (!row) throw new StoreError("Practice item not found", 404);
     if (marked) db.prepare("INSERT OR IGNORE INTO wrong_book_items (owner_id, question_id, created_at) VALUES (?, ?, ?)")
-      .run(OWNER_ID, String(row.question_id), now());
+      .run(ownerId, String(row.question_id), now());
     else db.prepare("DELETE FROM wrong_book_items WHERE owner_id = ? AND question_id = ?")
-      .run(OWNER_ID, String(row.question_id));
+      .run(ownerId, String(row.question_id));
   });
-  return practiceSessionFromDb(sessionId);
+  return practiceSessionFromDb(ownerId, fullAccess, sessionId);
 }
 
-export function getPracticeSession(sessionId: string) {
-  return practiceSessionFromDb(sessionId);
+export function getPracticeSession(ownerId: string, fullAccess: boolean, sessionId: string) {
+  return practiceSessionFromDb(ownerId, fullAccess, sessionId);
 }
 
 function importJobFromRow(row: SqliteRow): ImportJob {
@@ -492,7 +581,33 @@ export function documentExists(documentId: string) {
     .get(documentId, OWNER_ID));
 }
 
-export function getStudySummary(): StudySummary {
+export function canAccessQuestion(ownerId: string, fullAccess: boolean, questionId: string) {
+  if (!fullAccess) ensurePreviewEntitlements(ownerId);
+  const entitlementJoin = fullAccess ? "" : `JOIN user_question_entitlements uqe
+    ON uqe.question_id = q.id AND uqe.user_id = ?`;
+  const params = fullAccess ? [questionId] : [ownerId, questionId];
+  return Boolean(getDb().prepare(`SELECT 1 AS found FROM questions q
+    ${entitlementJoin}
+    WHERE q.id = ? AND q.current_revision_id IS NOT NULL LIMIT 1`).get(...params));
+}
+
+export function canAccessDocumentPage(ownerId: string, fullAccess: boolean, documentId: string, page: number) {
+  if (!Number.isInteger(page) || page < 1) return false;
+  if (fullAccess) {
+    return Boolean(getDb().prepare(`SELECT 1 AS found FROM source_documents
+      WHERE id = ? AND ? <= page_count LIMIT 1`).get(documentId, page));
+  }
+  ensurePreviewEntitlements(ownerId);
+  return Boolean(getDb().prepare(`SELECT 1 AS found
+    FROM user_question_entitlements uqe
+    JOIN questions q ON q.id = uqe.question_id
+    JOIN question_revisions qr ON qr.id = q.current_revision_id
+    JOIN json_each(qr.content_json, '$.source_pages') source_page
+    WHERE uqe.user_id = ? AND q.source_document_id = ?
+      AND CAST(source_page.value AS INTEGER) = ? LIMIT 1`).get(ownerId, documentId, page));
+}
+
+export function getStudySummary(ownerId: string): StudySummary {
   const db = getDb();
   const sessions = db.prepare(`SELECT ps.id, ps.status, ps.mode, ps.started_at, ps.completed_at,
       COUNT(pi.id) AS total, COUNT(ae.id) AS answered,
@@ -501,7 +616,7 @@ export function getStudySummary(): StudySummary {
     FROM practice_sessions ps
     LEFT JOIN practice_items pi ON pi.session_id = ps.id
     LEFT JOIN answer_events ae ON ae.session_item_id = pi.id
-    WHERE ps.owner_id = ? GROUP BY ps.id ORDER BY ps.started_at DESC LIMIT 3`).all(OWNER_ID) as SqliteRow[];
+    WHERE ps.owner_id = ? GROUP BY ps.id ORDER BY ps.started_at DESC LIMIT 3`).all(ownerId) as SqliteRow[];
   const mapped = sessions.map((row) => ({
     session_id: String(row.id), status: String(row.status) as "active" | "completed",
     answered: Number(row.answered), correct: Number(row.correct), total: Number(row.total),
@@ -513,8 +628,10 @@ export function getStudySummary(): StudySummary {
     SELECT question_id FROM wrong_book_items WHERE owner_id = ?
     UNION
     SELECT qr.question_id FROM answer_events ae JOIN practice_items pi ON pi.id = ae.session_item_id
-    JOIN question_revisions qr ON qr.id = pi.question_revision_id WHERE ae.is_correct = 0
-  )`).get(OWNER_ID) as SqliteRow;
+    JOIN question_revisions qr ON qr.id = pi.question_revision_id
+    JOIN practice_sessions ps ON ps.id = pi.session_id
+    WHERE ae.is_correct = 0 AND ps.owner_id = ?
+  )`).get(ownerId, ownerId) as SqliteRow;
   const active = mapped.find((session) => session.status === "active" && session.mode === "random")
     ?? mapped.find((session) => session.status === "active") ?? null;
   return { active_session: active, wrong_question_count: Number(wrong.count), recent_sessions: mapped };

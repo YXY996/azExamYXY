@@ -1,5 +1,5 @@
 import { authenticatedResponse } from "@/lib/auth-response";
-import { registerFirstUser } from "@/lib/auth-store";
+import { registerUser } from "@/lib/auth-store";
 
 export const runtime = "nodejs";
 
@@ -9,7 +9,7 @@ export async function POST(request: Request) {
     if (typeof body.username !== "string" || typeof body.password !== "string") {
       return Response.json({ error: "请输入用户名和密码" }, { status: 400 });
     }
-    return authenticatedResponse(registerFirstUser(body.username.trim(), body.password));
+    return authenticatedResponse(registerUser(body.username.trim(), body.password));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "注册失败" }, { status: 409 });
   }

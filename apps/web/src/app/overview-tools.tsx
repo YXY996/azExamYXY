@@ -14,9 +14,10 @@ const statusText: Record<ImportJob["status"], string> = {
   failed: "导入失败",
 };
 
-export default function OverviewTools({ onPractice, onWrongPractice }: {
+export default function OverviewTools({ onPractice, onWrongPractice, isAdmin }: {
   onPractice: (examCode?: "AZ-104" | "AZ-305", knowledgePoints?: string[]) => void;
   onWrongPractice: () => void;
+  isAdmin: boolean;
 }) {
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [summary, setSummary] = useState<StudySummary | null>(null);
@@ -33,17 +34,17 @@ export default function OverviewTools({ onPractice, onWrongPractice }: {
   const refresh = useCallback(async () => {
     try {
       const [jobResponse, summaryResponse, filterResponse] = await Promise.all([
-        fetch("/api/imports", { cache: "no-store" }),
+        isAdmin ? fetch("/api/imports", { cache: "no-store" }) : Promise.resolve(null),
         fetch("/api/study-summary", { cache: "no-store" }),
         fetch("/api/practice/filters", { cache: "no-store" }),
       ]);
-      if (jobResponse.ok) setJobs((await jobResponse.json()).jobs as ImportJob[]);
+      if (jobResponse?.ok) setJobs((await jobResponse.json()).jobs as ImportJob[]);
       if (summaryResponse.ok) setSummary(await summaryResponse.json() as StudySummary);
       if (filterResponse.ok) setFilters(await filterResponse.json() as PracticeFilters);
     } catch {
       setMessage("暂时无法获取最新状态，已保留上次结果");
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     const initial = window.requestAnimationFrame(() => void refresh());
@@ -97,7 +98,7 @@ export default function OverviewTools({ onPractice, onWrongPractice }: {
 
   return (
     <>
-      <section className="overview-tool-grid">
+      {isAdmin && <section className="overview-tool-grid">
         <article className="upload-card">
           <div className="section-heading"><div><p className="eyebrow">私人导入</p><h2>导入新的题目 PDF</h2></div><span className="status-pill warning">最大 100 MiB</span></div>
           <p className="tool-copy">文件只保存在本机私有目录。系统提取候选题，不会猜测正确答案。</p>
@@ -125,7 +126,7 @@ export default function OverviewTools({ onPractice, onWrongPractice }: {
             </div>
           </> : <p className="task-empty">上传后会在这里显示真实处理阶段；没有可靠分母的阶段不会显示假百分比。</p>}
         </article>
-      </section>
+      </section>}
 
       <section className="study-summary-grid">
         <article><p className="eyebrow">20 题一组</p><h2>{summary?.active_session ? "继续本组练习" : "开始随机练习"}</h2><p>{summary?.active_session ? `已完成 ${summary.active_session.answered} / ${summary.active_session.total} · 正确率 ${summary.active_session.accuracy}% · ${formatDuration(summary.active_session.duration_ms)}` : "每组从题库随机抽取 20 题"}</p><button className="secondary-button" onClick={() => onPractice()}>{summary?.active_session ? "继续本组" : "随机开始 20 题"}</button></article>

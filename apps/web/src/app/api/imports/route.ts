@@ -5,10 +5,12 @@ import path from "node:path";
 import { hasPdfMagic, MAX_UPLOAD_BYTES, parseImportOptions, sanitizeDisplayFilename } from "@/lib/import-domain";
 import { ensureImportRunner } from "@/lib/import-runner";
 import { createImportJob, listImportJobs, StoreError } from "@/lib/review-store";
+import { authErrorResponse, requireAdmin } from "@/lib/auth-request";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
+  try { await requireAdmin(request); } catch (error) { return authErrorResponse(error)!; }
   const jobs = listImportJobs();
   for (const job of jobs) {
     if (["queued", "validating", "extracting", "rendering", "committing"].includes(job.status)) {
@@ -24,6 +26,7 @@ export async function POST(request: Request) {
   const partPath = path.join(partRoot, `${randomUUID()}.part`);
   let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
+    await requireAdmin(request);
     const options = parseImportOptions(request.url);
     if (!options) return Response.json({ error: "请选择有效的考试类型和导入范围" }, { status: 400 });
     const { examCode, maxQuestions } = options;
@@ -83,6 +86,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (handle) await handle.close().catch(() => undefined);
     await unlink(partPath).catch(() => undefined);
+    const authResponse = authErrorResponse(error); if (authResponse) return authResponse;
     if (error instanceof StoreError) return Response.json({ error: error.message }, { status: error.status });
     return Response.json({ error: "无法保存上传文件" }, { status: 500 });
   }

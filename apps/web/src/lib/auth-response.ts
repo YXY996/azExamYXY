@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { AppUser } from "./auth-store";
 import { createSessionToken } from "./session-token";
 
 export function sessionSecret() {
@@ -7,8 +8,8 @@ export function sessionSecret() {
   return secret;
 }
 
-export async function authenticatedResponse(user: { id: string; username: string }) {
-  const response = NextResponse.json({ user: { username: user.username } });
+export async function authenticatedResponse(user: AppUser) {
+  const response = NextResponse.json({ user: { id: user.id, username: user.username, role: user.role, access_tier: user.access_tier } });
   response.cookies.set("az_exam_session", await createSessionToken(user.id, sessionSecret()), {
     httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production",
     path: "/", maxAge: 30 * 24 * 60 * 60,

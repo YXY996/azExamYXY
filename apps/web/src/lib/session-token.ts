@@ -23,13 +23,19 @@ export async function createSessionToken(userId: string, secret: string) {
 }
 
 export async function verifySessionToken(token: string | undefined, secret: string) {
-  if (!token || !secret) return false;
+  return Boolean(await readSessionToken(token, secret));
+}
+
+export async function readSessionToken(token: string | undefined, secret: string) {
+  if (!token || !secret) return null;
   const [payload, signature, extra] = token.split(".");
-  if (!payload || !signature || extra || signature !== await sign(payload, secret)) return false;
+  if (!payload || !signature || extra || signature !== await sign(payload, secret)) return null;
   try {
     const parsed = JSON.parse(new TextDecoder().decode(fromBase64url(payload))) as { sub?: string; exp?: number };
-    return typeof parsed.sub === "string" && typeof parsed.exp === "number" && parsed.exp > Date.now();
+    return typeof parsed.sub === "string" && typeof parsed.exp === "number" && parsed.exp > Date.now()
+      ? { sub: parsed.sub, exp: parsed.exp }
+      : null;
   } catch {
-    return false;
+    return null;
   }
 }

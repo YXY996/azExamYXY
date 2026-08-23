@@ -408,3 +408,27 @@ button { color: inherit; }
 .auth-card form .primary-button { width: 100%; margin-top: 0.25rem; }
 .auth-card > a { display: inline-block; color: #2563a9; font-weight: 750; }
 .auth-message { padding: 0.8rem 0.9rem; border-radius: 11px; color: #8a3528; background: #fff0ed; line-height: 1.45; }
+
+.access-card,.admin-access-card { margin:24px 0; padding:24px; border:1px solid var(--line); border-radius:20px; background:var(--paper); box-shadow:0 8px 24px rgba(26,48,78,.04); }
+.access-card { display:grid; grid-template-columns:1.2fr 1fr; gap:28px; align-items:center; border-color:#bfd8fb; background:linear-gradient(135deg,#f4f9ff,#fff); }
+.access-card h2,.admin-access-card h2 { margin:0; }
+.access-card p:not(.eyebrow) { margin-bottom:0; color:var(--muted); line-height:1.65; }
+.key-redeem { display:grid; grid-template-columns:1fr auto; gap:10px; }
+.key-redeem input { min-width:0; padding:0 13px; border:1px solid var(--line); border-radius:10px; font:inherit; }
+.key-redeem small { grid-column:1/-1; color:var(--muted); }
+.issued-key { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin:18px 0; padding:16px; border:1px solid #b8dfcc; border-radius:12px; background:var(--green-soft); }
+.issued-key strong { grid-column:1/-1; font-size:12px; }
+.issued-key code { min-width:0; overflow-wrap:anywhere; color:#0d6747; font-size:14px; font-weight:800; }
+.user-access-list { display:grid; margin-top:18px; border-top:1px solid var(--line); }
+.user-access-row { display:flex; justify-content:space-between; gap:18px; align-items:center; padding:15px 0; border-bottom:1px solid var(--line); }
+.user-access-row strong,.user-access-row small { display:block; }
+.user-access-row small { margin-top:5px; color:var(--muted); }
+.user-access-row>div { display:flex; gap:8px; }
+
+@media (max-width:760px) {
+  .access-card { grid-template-columns:1fr; gap:18px; }
+  .key-redeem { grid-template-columns:1fr; }
+  .key-redeem small { grid-column:auto; }
+  .issued-key,.user-access-row { grid-template-columns:1fr; }
+  .user-access-row { align-items:stretch; flex-direction:column; }
+}

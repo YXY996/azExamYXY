@@ -9,6 +9,7 @@ import { makeManualProvenance, type EditableReview } from "@/lib/review-domain";
 import type { PracticeSession } from "@/lib/types";
 import OverviewTools from "./overview-tools";
 import AgentMonitor from "./agent-monitor";
+import { AccessPanel, AdminAccessPanel, type WorkspaceUser } from "./access-management";
 
 type View = "overview" | "review" | "practice" | "agents";
 const typeLabels: Record<CandidateQuestion["type"], string> = {
@@ -38,7 +39,10 @@ function editableOf(question: CandidateQuestion): EditableReview {
   };
 }
 
-export default function Workspace({ bundle }: { bundle: CandidateBundle }) {
+export default function Workspace({ bundle, currentUser }: { bundle: CandidateBundle; currentUser?: WorkspaceUser }) {
+  const user = currentUser ?? { id: "legacy", username: "管理员", role: "admin" as const, access_tier: "full" as const };
+  const isAdmin = user.role === "admin";
+  const hasFullAccess = isAdmin || user.access_tier === "full";
   const router = useRouter();
   const [view, setView] = useState<View>("overview");
   const [questions, setQuestions] = useState(bundle.candidates);
@@ -216,43 +220,45 @@ export default function Workspace({ bundle }: { bundle: CandidateBundle }) {
         </button>
         <nav aria-label="主导航">
           <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>概览</button>
-          <button className={view === "review" ? "active" : ""} onClick={() => setView("review")}>校对</button>
+          {isAdmin && <button className={view === "review" ? "active" : ""} onClick={() => setView("review")}>校对</button>}
           <button className={view === "practice" ? "active" : ""} onClick={() => openPractice()}>练习</button>
-          <button className={view === "agents" ? "active" : ""} onClick={() => setView("agents")}>AI 工作台</button>
+          {isAdmin && <button className={view === "agents" ? "active" : ""} onClick={() => setView("agents")}>AI 工作台</button>}
         </nav>
-        <div className="account-actions"><div className="private-chip"><span /> 私人题库</div><button onClick={logout}>退出</button></div>
+        <div className="account-actions"><div className="private-chip"><span /> {user.username} · {isAdmin ? "管理员" : hasFullAccess ? "完整题库" : "50 题体验"}</div><button onClick={logout}>退出</button></div>
       </header>
 
       {view === "overview" && (
         <main className="overview-page">
           <section className="hero-panel">
             <div>
-              <p className="eyebrow">全量题库与答案已接入</p>
-              <h1>1210 道 AZ-104 / AZ-305 题目，电脑和手机都能练。</h1>
-              <p className="hero-copy">题库包含 610 道 PDF 题和 600 道原创模拟题；可按考试与知识点随机练习，普通题自动评分，图片交互题保留 PDF 标记答案供自评。</p>
+              <p className="eyebrow">{hasFullAccess ? "完整题库与答案已接入" : "固定 50 题体验"}</p>
+              <h1>{hasFullAccess ? "1210 道 AZ-104 / AZ-305 题目，电脑和手机都能练。" : "先用 50 道固定体验题，练习记录会一直保留。"}</h1>
+              <p className="hero-copy">{hasFullAccess ? "题库包含 610 道 PDF 题和 600 道原创模拟题；可按考试与知识点随机练习。" : "注册后仍可查看和练习分配给你的 50 道题；获得管理员发放的专属 Key 后可解锁全部题目。"}</p>
               <div className="hero-actions">
-                <button className="primary-button" onClick={() => setView("review")}>开始校对</button>
+                {isAdmin && <button className="primary-button" onClick={() => setView("review")}>开始校对</button>}
                 <button className="secondary-button" onClick={() => openPractice()}>继续练习</button>
                 <button className="secondary-button" onClick={() => openPractice(true)}>随机开始 20 题</button>
               </div>
             </div>
-            <div className="document-card">
+            {isAdmin && <div className="document-card">
               <div className="document-icon">PDF</div>
               <div><strong>{bundle.document.filename}</strong><p>{bundle.document.exam_code} · {bundle.document.page_count} 页 · 文本与图片混合</p></div>
               <span className="status-pill success">答案已导入</span>
-            </div>
+            </div>}
           </section>
 
-          <section className="metric-grid" aria-label="导入统计">
+          {isAdmin && <section className="metric-grid" aria-label="导入统计">
             <article><span>PDF 题库</span><strong>{questions.length}</strong><small>覆盖至第 {lastSamplePage} 页</small></article>
             <article><span>待处理</span><strong>{questions.length - approved.length}</strong><small>未发布题目</small></article>
             <article><span>跨页题</span><strong>{crossPage}</strong><small>已自动合并来源页</small></article>
             <article><span>未结构化题</span><strong>{unknown}</strong><small>图片题已转为自评</small></article>
-          </section>
+          </section>}
 
-          <OverviewTools onPractice={(examCode, points) => openPractice(true, "random", examCode, points)} onWrongPractice={() => openPractice(true, "wrong_book")} />
+          <AccessPanel user={user} onUpgraded={() => router.refresh()} />
+          {isAdmin && <AdminAccessPanel />}
+          <OverviewTools isAdmin={isAdmin} onPractice={(examCode, points) => openPractice(true, "random", examCode, points)} onWrongPractice={() => openPractice(true, "wrong_book")} />
 
-          <section className="pipeline-card">
+          {isAdmin && <section className="pipeline-card">
             <div className="section-heading"><div><p className="eyebrow">导入任务</p><h2>解析进度</h2></div><span className="status-pill success">首批候选已生成</span></div>
             <div className="pipeline">
               {["文件检查", "文本提取", "题目切分", "规则校验", "人工校对", "发布练习"].map((step, index) => (
@@ -260,11 +266,11 @@ export default function Workspace({ bundle }: { bundle: CandidateBundle }) {
               ))}
             </div>
             <div className="notice-card"><span>✓</span><div><strong>答案来自带讨论版 PDF</strong><p>系统按 PDF 标记直接导入，未进行额外正确性核对；图片交互题保留答案页供你自行对照。</p></div></div>
-          </section>
+          </section>}
         </main>
       )}
 
-      {view === "review" && current && (
+      {isAdmin && view === "review" && current && (
         <main className="review-page">
           <div className="review-toolbar">
             <div><p className="eyebrow">{bundle.document.exam_code} · Topic {current.topic}</p><h1>{current.source_question_no}</h1></div>
@@ -350,7 +356,7 @@ export default function Workspace({ bundle }: { bundle: CandidateBundle }) {
         </main>
       )}
 
-      {view === "agents" && <AgentMonitor />}
+      {isAdmin && view === "agents" && <AgentMonitor />}
 
       {view === "practice" && (
         <main className="practice-page">
@@ -385,7 +391,7 @@ export default function Workspace({ bundle }: { bundle: CandidateBundle }) {
               <div className="practice-actions">{!practiceResult ? <button className="primary-button" disabled={practiceSelection.length === 0} onClick={submitPracticeAnswer}>{practiceQuestion.type === "image_interaction" ? "记录自评" : "确认答案"}</button> : <button className="primary-button" disabled={practiceIndex >= practiceSession.items.length - 1} onClick={nextPracticeQuestion}>{practiceIndex >= practiceSession.items.length - 1 ? `本组完成 · ${practiceSession.summary.accuracy}% · ${formatDuration(practiceSession.summary.duration_ms)}` : "下一题"}</button>}</div>
             </section>
           ) : (
-            <section className="practice-empty"><div className="empty-icon">✓</div><p className="eyebrow">练习门禁正常工作</p><h1>还没有可练习的题目</h1><p>{practiceError || "这份 PDF 不包含答案。请先在电脑校对工作台填写答案来源并批准题目。"}</p><button className="primary-button" onClick={() => setView("review")}>去校对第一题</button></section>
+            <section className="practice-empty"><div className="empty-icon">✓</div><p className="eyebrow">练习门禁正常工作</p><h1>还没有可练习的题目</h1><p>{practiceError || (isAdmin ? "请先在校对工作台批准题目。" : "当前筛选条件下没有可用的体验题，请返回概览重新选择。")}</p>{isAdmin && <button className="primary-button" onClick={() => setView("review")}>去校对第一题</button>}</section>
           )}
         </main>
       )}
