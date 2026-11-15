@@ -3,7 +3,7 @@ name = "az-exam-importer"
 version = "0.1.0"
 description = "Private PDF question-candidate importer for AZ Exam Coach"
 requires-python = ">=3.11"
-dependencies = ["pypdf>=6,<7", "jsonschema>=4,<5"]
+dependencies = ["pypdf>=6,<8", "jsonschema>=4,<5"]
 
 [project.scripts]
 az-exam-import = "az_exam_importer.cli:main"
